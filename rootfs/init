@@ -1,0 +1,66 @@
+#!/bin/bash
+# BoxHarbor Base Image - Main Init Script
+set -e
+
+echo "
+╔══════════════════════════════════════╗
+║      BoxHarbor Container Init        ║
+╚══════════════════════════════════════╝
+"
+
+# Export environment for child processes
+export PUID PGID TZ UMASK
+
+# Run all cont-init.d scripts
+if [ -d /etc/cont-init.d ]; then
+    echo "[init] Running initialization scripts..."
+    for script in /etc/cont-init.d/*; do
+        if [ -f "$script" ] && [ -x "$script" ]; then
+            script_name=$(basename "$script")
+            echo "[init] → Executing: $script_name"
+            if ! "$script"; then
+                echo "[init] ✗ Script failed: $script_name"
+                exit 1
+            fi
+        fi
+    done
+    echo "[init] ✓ All initialization scripts completed"
+fi
+
+echo "──────────────────────────────────────"
+
+# Start all services in background
+service_pids=()
+if [ -d /etc/services.d ]; then
+    for service_dir in /etc/services.d/*; do
+        if [ -d "$service_dir" ] && [ -f "$service_dir/run" ]; then
+            service_name=$(basename "$service_dir")
+            echo "[services] Starting: $service_name"
+            "$service_dir/run" &
+            service_pids+=($!)
+        fi
+    done
+fi
+
+echo "
+╔══════════════════════════════════════╗
+║     Container Ready - Startup OK     ║
+╚══════════════════════════════════════╝
+"
+
+# Execute command if provided, otherwise wait for services
+if [ $# -gt 0 ]; then
+    echo "[init] Executing command: $*"
+    exec "$@"
+else
+    # Wait for any service to exit
+    if [ ${#service_pids[@]} -gt 0 ]; then
+        wait -n "${service_pids[@]}"
+        exit_code=$?
+        echo "[init] A service has exited with code: $exit_code"
+        exit $exit_code
+    else
+        # No services, just wait indefinitely
+        wait
+    fi
+fi

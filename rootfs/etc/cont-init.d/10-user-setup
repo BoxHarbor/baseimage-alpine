@@ -1,0 +1,61 @@
+#!/bin/bash
+# User and permission setup
+set -e
+
+echo "[user-setup] Configuring user with PUID=${PUID} PGID=${PGID}"
+
+# Check if running as root or rootless
+if [ "$(id -u)" -eq 0 ]; then
+    # Running as root (traditional Docker)
+    CURRENT_UID=$(id -u appuser 2>/dev/null || echo 1000)
+    CURRENT_GID=$(id -g appuser 2>/dev/null || echo 1000)
+    
+    if [ "$CURRENT_UID" != "$PUID" ] || [ "$CURRENT_GID" != "$PGID" ]; then
+        echo "[user-setup] Adjusting UID:GID to ${PUID}:${PGID}"
+        
+        # Modify group first
+        if getent group "$PGID" >/dev/null 2>&1; then
+            existing_group=$(getent group "$PGID" | cut -d: -f1)
+            if [ "$existing_group" != "appuser" ]; then
+                echo "[user-setup] GID $PGID already exists for group: $existing_group"
+            fi
+        fi
+        groupmod -o -g "$PGID" appuser 2>/dev/null || true
+        
+        # Modify user
+        if getent passwd "$PUID" >/dev/null 2>&1; then
+            existing_user=$(getent passwd "$PUID" | cut -d: -f1)
+            if [ "$existing_user" != "appuser" ]; then
+                echo "[user-setup] UID $PUID already exists for user: $existing_user"
+            fi
+        fi
+        usermod -o -u "$PUID" appuser 2>/dev/null || true
+    fi
+    
+    # Fix ownership of key directories
+    echo "[user-setup] Setting ownership of /config, /app, /defaults"
+    chown -R appuser:appuser /config /app /defaults 2>/dev/null || true
+    
+else
+    # Running in rootless mode (Podman/Docker rootless)
+    echo "[user-setup] ⚠ Rootless mode detected"
+    echo "[user-setup] UID/GID mapping handled by container runtime"
+    echo "[user-setup] Current container UID: $(id -u), GID: $(id -g)"
+fi
+
+# Configure timezone
+if [ -n "$TZ" ] && [ -f "/usr/share/zoneinfo/$TZ" ]; then
+    echo "[user-setup] Setting timezone to: $TZ"
+    ln -sf "/usr/share/zoneinfo/$TZ" /etc/localtime
+    echo "$TZ" > /etc/timezone
+else
+    echo "[user-setup] Using default timezone: UTC"
+fi
+
+# Set umask
+if [ -n "$UMASK" ]; then
+    echo "[user-setup] Setting umask to: $UMASK"
+    umask "$UMASK"
+fi
+
+echo "[user-setup] ✓ User configuration complete"
