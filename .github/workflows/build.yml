@@ -15,7 +15,15 @@ on:
 
 env:
   IMAGE_NAME: baseimage-alpine
-  PLATFORMS: linux/amd64,linux/arm64,linux/arm/v7
+  PLATFORMS: >
+    linux/amd64,
+    linux/arm64/v8,
+    linux/arm/v7,
+    linux/arm/v6,
+    linux/386,
+    linux/ppc64le,
+    linux/riscv64,
+    linux/s390x
 
 jobs:
   build:
@@ -57,13 +65,27 @@ jobs:
             ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
             ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=sha,prefix={{branch}}-
+            # Tags pour les releases Git (v1.2.3)
+            type=semver,pattern={{version}},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=semver,pattern={{major}}.{{minor}},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=semver,pattern={{major}},enable=${{ startsWith(github.ref, 'refs/tags/v') && !startsWith(github.ref, 'refs/tags/v0.') }}
+            
+            # Tag latest pour la branche main
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            
+            # Tag develop pour la branche develop
+            type=raw,value=develop,enable=${{ github.ref == 'refs/heads/develop' }}
+            
+            # Tag pour les PR (ne sera pas pushé)
+            type=ref,event=pr,prefix=pr-,enable=${{ github.event_name == 'pull_request' }}
+          
+          flavor: |
+            latest=false
+          
+          labels: |
+            org.opencontainers.image.title=${{ env.IMAGE_NAME }}
+            org.opencontainers.image.description=${{ github.event.repository.description }}
+            org.opencontainers.image.vendor=${{ github.repository_owner }}
       
       - name: Build and push
         uses: docker/build-push-action@v5
@@ -82,7 +104,7 @@ jobs:
       
       - name: Update Docker Hub description
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-        uses: peter-evans/dockerhub-description@v5
+        uses: peter-evans/dockerhub-description@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
